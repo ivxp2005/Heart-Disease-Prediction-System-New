@@ -256,24 +256,28 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Load the trained model and info
+# Load the trained model bundle and info
 @st.cache_resource
 def load_model():
     try:
-        # Get the directory where this script is located
         import os
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # Build absolute paths to model files
         model_path = os.path.join(script_dir, 'heart_disease_model.pkl')
-        info_path = os.path.join(script_dir, 'model_info.pkl')
-        
-        # Load model and info
-        model = joblib.load(model_path)
+        info_path  = os.path.join(script_dir, 'model_info.pkl')
+
+        bundle = joblib.load(model_path)
         with open(info_path, 'rb') as f:
             model_info = pickle.load(f)
-        return model, model_info
+
+        # Support both old single-model format and new bundle format
+        if isinstance(bundle, dict) and 'model' in bundle:
+            return bundle, model_info   # new bundle
+        else:
+            # Legacy: wrap old model in minimal bundle with default threshold
+            return {'model': bundle, 'imputer': None, 'scaler': None,
+                    'threshold': 0.5, 'feature_cols': model_info.get('feature_names', [])}, model_info
     except Exception as e:
+        import os
         st.error(f"Error loading model: {e}")
         st.info(f"Looking for model in: {os.path.dirname(os.path.abspath(__file__))}")
         return None, None
@@ -373,20 +377,21 @@ def main():
     st.markdown('<h1 class="header-title">❤️ Heart Disease Risk Predictor</h1>', unsafe_allow_html=True)
     st.markdown('<p class="header-subtitle">AI-Powered 10-Year Coronary Heart Disease Risk Assessment</p>', unsafe_allow_html=True)
     
-    # Load model
-    model, model_info = load_model()
+    # Load model bundle
+    bundle, model_info = load_model()
     
-    if model is None:
-        st.error("⚠️ Model not found! Please ensure you've run the notebook to train and save the model.")
+    if bundle is None:
+        st.error("⚠️ Model not found! Please run train_model.py to train and save the model.")
         return
-    
+
+    roc_str = f" | ROC-AUC: {model_info['roc_auc']:.2%}" if 'roc_auc' in model_info else ""
     # Display model info in a clean card
     st.markdown(f"""
         <div class="info-box">
             <h3>🤖 Model Information</h3>
             <p><strong>Algorithm:</strong> {model_info['model_name']}</p>
-            <p><strong>Accuracy:</strong> {model_info['test_accuracy']:.2%}</p>
-            <p><strong>Dataset:</strong> Framingham Heart Study (3,658 patients)</p>
+            <p><strong>Accuracy:</strong> {model_info['test_accuracy']:.2%}{roc_str}</p>
+            <p><strong>Dataset:</strong> Framingham Heart Study (4,240 patients)</p>
         </div>
     """, unsafe_allow_html=True)
     
@@ -396,25 +401,25 @@ def main():
     
     # Demographics
     st.sidebar.markdown('<p class="category-header">👤 Demographics</p>', unsafe_allow_html=True)
-    male = st.sidebar.selectbox("Gender", ["Male", "Female"], index=0)
+    male = st.sidebar.selectbox("Gender", ["Male", "Female"], index=1)   # Female → lower baseline risk
     male_val = 1 if male == "Male" else 0
-    age = st.sidebar.slider("Age (years)", 20, 80, 50)
-    education = st.sidebar.selectbox("Education Level", [1, 2, 3, 4], index=1, 
-                                     format_func=lambda x: {1:"Some High School", 2:"High School/GED", 
+    age = st.sidebar.slider("Age (years)", 20, 80, 26)                   # Young age → low risk
+    education = st.sidebar.selectbox("Education Level", [1, 2, 3, 4], index=3,
+                                     format_func=lambda x: {1:"Some High School", 2:"High School/GED",
                                                             3:"Some College", 4:"College Degree"}[x])
-    
+
     # Lifestyle
     st.sidebar.markdown('<p class="category-header">🚬 Lifestyle</p>', unsafe_allow_html=True)
     currentSmoker = st.sidebar.selectbox("Current Smoker", ["No", "Yes"], index=0)
     currentSmoker_val = 1 if currentSmoker == "Yes" else 0
-    
+
     # Conditionally show cigarettes slider only if smoker
     if currentSmoker == "Yes":
         cigsPerDay = st.sidebar.slider("Cigarettes per Day", 0, 60, 10)
     else:
         cigsPerDay = 0
         st.sidebar.markdown("**Cigarettes per Day:** 0 (Not a smoker)")
-    
+
     # Medical History
     st.sidebar.markdown('<p class="category-header">🏥 Medical History</p>', unsafe_allow_html=True)
     BPMeds = st.sidebar.selectbox("On BP Medication", ["No", "Yes"], index=0)
@@ -425,30 +430,87 @@ def main():
     prevalentHyp_val = 1 if prevalentHyp == "Yes" else 0
     diabetes = st.sidebar.selectbox("Diabetes", ["No", "Yes"], index=0)
     diabetes_val = 1 if diabetes == "Yes" else 0
-    
+
     # Clinical Measurements
     st.sidebar.markdown('<p class="category-header">🔬 Clinical Measurements</p>', unsafe_allow_html=True)
-    totChol = st.sidebar.slider("Total Cholesterol (mg/dL)", 100, 400, 200)
-    sysBP = st.sidebar.slider("Systolic Blood Pressure (mmHg)", 80, 250, 120)
-    diaBP = st.sidebar.slider("Diastolic Blood Pressure (mmHg)", 50, 150, 80)
-    BMI = st.sidebar.slider("BMI (Body Mass Index)", 15.0, 50.0, 25.0, 0.1)
-    heartRate = st.sidebar.slider("Heart Rate (bpm)", 40, 150, 70)
-    glucose = st.sidebar.slider("Glucose Level (mg/dL)", 40, 300, 80)
+    totChol  = st.sidebar.slider("Total Cholesterol (mg/dL)",        100,  400, 170)    # healthy range
+    sysBP    = st.sidebar.slider("Systolic Blood Pressure (mmHg)",    80,  250, 108)    # normal
+    diaBP    = st.sidebar.slider("Diastolic Blood Pressure (mmHg)",   50,  150,  68)    # normal
+    BMI      = st.sidebar.slider("BMI (Body Mass Index)",            15.0, 50.0, 21.5, 0.1)  # healthy
+    heartRate= st.sidebar.slider("Heart Rate (bpm)",                  40,  150,  62)    # normal
+    glucose  = st.sidebar.slider("Glucose Level (mg/dL)",             40,  300,  74)    # normal
     
+    # Risk Mode selector
+    st.sidebar.markdown('<p class="category-header">⚙️ Prediction Mode</p>', unsafe_allow_html=True)
+    risk_mode = st.sidebar.radio(
+        "Select sensitivity vs false alarm balance:",
+        options=[
+            "🔴 High Sensitivity  (catch more, more alerts)",
+            "🟡 Balanced  (recommended)",
+            "🟢 High Precision  (fewer alerts, may miss some)",
+        ],
+        index=1,
+        help="High Sensitivity: catches 89% CHD, 57% false alarms\n"
+             "Balanced: catches 76% CHD, 47% false alarms\n"
+             "High Precision: catches 67% CHD, 40% false alarms"
+    )
+
+    # Map mode → threshold and performance stats
+    mode_config = {
+        "🔴 High Sensitivity  (catch more, more alerts)":  {"threshold": 0.336, "sensitivity": "89%", "false_alarm": "57%"},
+        "🟡 Balanced  (recommended)":                      {"threshold": 0.400, "sensitivity": "76%", "false_alarm": "47%"},
+        "🟢 High Precision  (fewer alerts, may miss some)": {"threshold": 0.450, "sensitivity": "67%", "false_alarm": "40%"},
+    }
+    selected_mode = mode_config[risk_mode]
+
+    st.sidebar.markdown(f"""
+        <div style='background:#2d2d2d;border-radius:8px;padding:10px 14px;
+                    margin-top:8px;border-left:4px solid #3b82f6;
+                    font-size:0.95rem;color:#e0e0e0;'>
+        <b>Mode stats:</b><br>
+        ✅ Catches <b>{selected_mode['sensitivity']}</b> of real CHD cases<br>
+        ⚠️ False alarm rate: <b>{selected_mode['false_alarm']}</b> of healthy patients
+        </div>""", unsafe_allow_html=True)
+
     st.sidebar.markdown("---")
     predict_button = st.sidebar.button("🔮 PREDICT RISK")
     
     # Main content area
     if predict_button:
-        # Prepare input data
-        patient_data = np.array([[male_val, age, education, currentSmoker_val, cigsPerDay, 
-                                 BPMeds_val, prevalentStroke_val, prevalentHyp_val, diabetes_val,
-                                 totChol, sysBP, diaBP, BMI, heartRate, glucose]])
-        
-        # Make prediction
-        prediction = model.predict(patient_data)[0]
-        probability = model.predict_proba(patient_data)[0]
-        risk_probability = probability[1] * 100  # Probability of CHD (class 1)
+        # Build raw feature row (original 15 features)
+        raw = {
+            'male': male_val, 'age': age, 'education': education,
+            'currentSmoker': currentSmoker_val, 'cigsPerDay': cigsPerDay,
+            'BPMeds': BPMeds_val, 'prevalentStroke': prevalentStroke_val,
+            'prevalentHyp': prevalentHyp_val, 'diabetes': diabetes_val,
+            'totChol': totChol, 'sysBP': sysBP, 'diaBP': diaBP,
+            'BMI': BMI, 'heartRate': heartRate, 'glucose': glucose,
+        }
+        # Engineered features (must match train_model.py)
+        raw['pulse_pressure']   = sysBP - diaBP
+        raw['age_sysBP']        = age * sysBP
+        raw['smoke_age']        = currentSmoker_val * age
+        raw['glucose_diabetes'] = glucose * (diabetes_val + 1)
+        raw['smoking_burden']   = currentSmoker_val * cigsPerDay
+
+        feature_cols = bundle.get('feature_cols', model_info.get('feature_names', list(raw.keys())))
+        patient_df   = pd.DataFrame([raw])[feature_cols]
+
+        # Apply imputer + scaler if available (new bundle format)
+        if bundle.get('imputer') is not None:
+            patient_arr = bundle['scaler'].transform(bundle['imputer'].transform(patient_df))
+        else:
+            patient_arr = patient_df.values
+
+        model     = bundle['model']
+        threshold = selected_mode['threshold']
+
+        # Make prediction using selected mode threshold
+        probability      = model.predict_proba(patient_arr)[0]
+        risk_probability = probability[1] * 100  # raw % for gauge
+        # Apply threshold for category label
+        chd_prob  = probability[1]
+        prediction = int(chd_prob >= threshold)
         
         # Display results
         col1, col2, col3 = st.columns([1, 2, 1])
@@ -460,7 +522,7 @@ def main():
             
             # Risk gauge
             fig_gauge = create_risk_gauge(risk_probability)
-            st.plotly_chart(fig_gauge, use_container_width=True)
+            st.plotly_chart(fig_gauge, width="stretch")
             
             # Metrics
             metric_col1, metric_col2, metric_col3 = st.columns(3)
@@ -480,47 +542,58 @@ def main():
                 )
             
             with metric_col3:
-                status = "🟢 Low" if risk_probability < 20 else "🟡 Moderate" if risk_probability < 40 else "🔴 High"
+                # Use threshold-based prediction so this changes with mode
+                status = "🔴 At Risk" if prediction == 1 else "🟢 Not At Risk"
                 st.metric(
-                    label="Risk Category", 
+                    label="Risk Category",
                     value=status
                 )
+
+            # Show active mode info under metrics
+            mode_label = risk_mode.split('(')[0].strip()
+            st.info(f"**Mode: {mode_label}** — threshold {threshold:.2f} | "
+                    f"Catches {selected_mode['sensitivity']} of real CHD cases | "
+                    f"False alarm rate: {selected_mode['false_alarm']} of healthy patients")
             
             st.markdown("---")
             
             # Health metrics visualization
-            fig_features = create_feature_chart([male_val, age, education, currentSmoker_val, cigsPerDay, 
+            fig_features = create_feature_chart([male_val, age, education, currentSmoker_val, cigsPerDay,
                                                  BPMeds_val, prevalentStroke_val, prevalentHyp_val, diabetes_val,
                                                  totChol, sysBP, diaBP, BMI, heartRate, glucose])
-            st.plotly_chart(fig_features, use_container_width=True)
+            st.plotly_chart(fig_features, width="stretch")
             
-            # Risk interpretation
+            # Risk interpretation — driven by threshold-based prediction so it changes with mode
             st.markdown("### 💡 What This Means")
-            
-            if risk_probability < 20:
+
+            if prediction == 0:
                 st.success(f"""
-                    **Good News!** Your 10-year risk of developing coronary heart disease is **LOW** ({risk_probability:.1f}%).
-                    
+                    **Not flagged as at-risk** under the current mode ({mode_label.strip()}).
+                    Raw probability: **{risk_probability:.1f}%** — below the {threshold:.0%} threshold.
+
                     ✅ Continue maintaining a healthy lifestyle  
-                    ✅ Regular check-ups recommended  
+                    ✅ Regular check-ups still recommended  
                     ✅ Keep monitoring key health metrics
                 """)
-            elif risk_probability < 40:
-                st.warning(f"""
-                    **Attention Needed:** Your 10-year risk is **MODERATE** ({risk_probability:.1f}%).
-                    
-                    ⚠️ Consider lifestyle modifications  
-                    ⚠️ Consult with your healthcare provider  
-                    ⚠️ Monitor blood pressure and cholesterol
-                """)
             else:
-                st.error(f"""
-                    **Important:** Your 10-year risk is **HIGH** ({risk_probability:.1f}%).
-                    
-                    🚨 Seek medical consultation immediately  
-                    🚨 Lifestyle changes strongly recommended  
-                    🚨 Regular monitoring essential
-                """)
+                if risk_probability < 40:
+                    st.warning(f"""
+                        **Flagged as at-risk** under the current mode ({mode_label.strip()}).
+                        Raw probability: **{risk_probability:.1f}%** — above the {threshold:.0%} threshold.
+
+                        ⚠️ Consider lifestyle modifications  
+                        ⚠️ Consult with your healthcare provider  
+                        ⚠️ Monitor blood pressure and cholesterol
+                    """)
+                else:
+                    st.error(f"""
+                        **Flagged as HIGH risk** under the current mode ({mode_label.strip()}).
+                        Raw probability: **{risk_probability:.1f}%** — above the {threshold:.0%} threshold.
+
+                        🚨 Seek medical consultation immediately  
+                        🚨 Lifestyle changes strongly recommended  
+                        🚨 Regular monitoring essential
+                    """)
             
             # Risk factors
             st.markdown("### 🎯 Your Risk Factors")
@@ -629,8 +702,8 @@ def main():
                 
                 ### Based on:
                 - ✅ Framingham Heart Study data
-                - ✅ 3,658 patient records
-                - ✅ 85% prediction accuracy
+                - ✅ 4,240 patient records
+                - ✅ 70% ROC-AUC (optimised threshold)
                 - ✅ Multiple clinical factors
                 
                 ---
@@ -650,6 +723,26 @@ def main():
                 st.metric("High Risk Cases", "15%", help="Percentage with >50% risk")
             with stat_col3:
                 st.metric("Low Risk Cases", "52%", help="Percentage with <10% risk")
+
+    # ── Footer: Team Credits ──────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("""
+        <div style="
+            border-top: 1px solid #333333;
+            padding: 1.5rem 1rem;
+            text-align: center;
+        ">
+            <p style="color:#888888; font-size:0.78rem; letter-spacing:0.12em; text-transform:uppercase; margin-bottom:0.75rem;">
+                Developed by
+            </p>
+            <p style="color:#cccccc; font-size:0.95rem; font-weight:500; margin-bottom:0.6rem;">
+                Nazreen Shemeem &nbsp;&nbsp;|&nbsp;&nbsp; Pardhiv Suresh M &nbsp;&nbsp;|&nbsp;&nbsp; Mohamed Ibrahim &nbsp;&nbsp;|&nbsp;&nbsp; Zehbia Zulfikar
+            </p>
+            <p style="color:#555555; font-size:0.75rem; margin:0;">
+                &copy; 2026 Heart Disease Risk Predictor &nbsp;&middot;&nbsp; Framingham Heart Study
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
