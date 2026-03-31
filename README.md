@@ -410,10 +410,10 @@ Use these in the sidebar to verify the app is responding correctly:
 
 |  |  Name | Role |
 |:---:|:---|:---|
-| 💜 | **Nazreen Shemeem** | Project Lead & ML Engineer |
-| 💙 | **Pardhiv Suresh M** | Data Scientist & Backend Developer |
-| 💚 | **Mohamed Ibrahim** | Frontend & Streamlit Developer |
-| 🧡 | **Zehbia Zulfikar** | Research & Feature Engineering |
+ | **Nazreen Shemeem**  | 
+ | **Pardhiv Suresh M** | 
+ | **Mohamed Ibrahim**  | 
+ | **Zehbia Zulfikar**  | 
 
 <br>
 
