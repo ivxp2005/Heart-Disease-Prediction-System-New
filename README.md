@@ -408,8 +408,7 @@ Use these in the sidebar to verify the app is responding correctly:
 
 <br>
 
-|  |  Name | Role |
-|:---:|:---|:---|
+
  | **Nazreen Shemeem**  | 
  | **Pardhiv Suresh M** | 
  | **Mohamed Ibrahim**  | 
